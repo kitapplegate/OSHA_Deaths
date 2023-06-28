@@ -1,0 +1,144 @@
+---
+title: "Deaths Investigated by OSHA"
+author: "Kit Applegate"
+date: "2023-06-27"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = TRUE, warning = TRUE)
+```
+
+This page provides data on work-related fatalities that occurred under Federal OSHA and State Plan jurisdiction for cases that have been closed or citations issued on or after January 1, 2017. The data can be found at this [Link](https://www.osha.gov/fatalities#&sort%5B#incSum%5D=0-1-1-0).
+
+```{r cars, message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(lubridate)
+
+OSHA.Deaths <- read.csv("Data/oshadeaths.csv")
+
+OSHA.Deaths$Date.of.Incident <- as_date(mdy(OSHA.Deaths$Date.of.Incident))
+
+Deaths.Mutate <- OSHA.Deaths %>%
+  mutate(Year = year(Date.of.Incident), 
+         Month = month.abb[month(Date.of.Incident)], 
+         Age = str_extract(Hazard.Description, "(?<=\\().*?(?=\\))"), 
+         Age = as.factor(Age)) %>%
+  filter(Year >= 2017)
+
+Deaths.Mutate <- Deaths.Mutate %>%
+  rename(Citation.Issued = Citation.Issued.Related.to.Fatality,
+         Plan.Type = Federal.or.State.Plan)
+
+Deaths.Mutate <- Deaths.Mutate %>%
+  mutate(Plan.Type = ifelse(Plan.Type == "STATE", "State",
+                            ifelse(Plan.Type == "State Plan", "State",
+                                   ifelse(Plan.Type == "FEDERAL", "Federal", Plan.Type))))
+
+    
+
+
+```
+
+#### Deaths by year
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+Deaths.Mutate %>%
+  group_by(Year) %>%
+  summarise(Deaths.by.Year = n()) %>%
+  arrange(desc(Deaths.by.Year))
+```
+
+The data reveals the number of deaths per year and whether citations were provided, indicating a trend where citations were frequently absent.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Deaths.Mutate %>%
+  filter(Year <= 2022) %>%
+  group_by(Year) %>%
+  ggplot(aes(x = Year, fill = Citation.Issued)) +
+  geom_bar() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+  labs(title = "OSHA Investigated Deaths", 
+       subtitle = "If a Citation was Issued", 
+       y = "Deaths", 
+       x = "") +
+  scale_fill_grey() +
+  theme_dark()
+```
+
+In the graph, it is evident that the majority of the plans utilized were of the federal variety.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Deaths.Mutate %>%
+  filter(Year != "2023") %>%
+  group_by(Year) %>%
+  ggplot(aes(x = Year, fill = Plan.Type)) +
+  geom_bar() +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = 2) +
+  labs(title = "OSHA Investigated Deaths", 
+       subtitle = "If a State or Federal Plan was Used", 
+       y = "Deaths", 
+       x = "") +
+  scale_fill_grey() +
+  theme_dark()
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+Deaths.Mutate %>%
+  ggplot(aes(x = as.numeric(Age))) +
+  geom_histogram(binwidth = 1, color = "black", fill = "light gray") +
+  labs(title = "Histogram of the distribution of Age amoung OSHA Investigated Deaths", 
+       x = "Age", 
+       y = "Deaths") +
+  scale_fill_grey() +
+  theme_dark() 
+  
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(tidytext)
+library(dplyr)
+library(stringr)
+library(igraph)
+library(ggraph)
+library(tidyr)
+
+Haz.Discript <- as.data.frame(Deaths.Mutate$Hazard.Description)
+
+Words <- Deaths.Mutate %>%
+  unnest_tokens(output = "word", input = Hazard.Description) %>%
+  anti_join(stop_words, by = "word") %>%
+  filter(str_detect(word, "[[:alpha:]]"))
+
+Words.mentioned <- Words %>%
+  count(word, name = "Count") %>%
+  filter(Count >= 500)
+
+word.Correlations <- Words.mentioned %>%
+  spread(word, Count) %>%
+  cor(use = "pairwise.complete.obs") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "word") %>%
+  gather(key = "correlated_word", value = "correlation", -word) 
+
+
+set.seed(12345)
+graph_from_data_frame(
+  d = word.Correlations %>% select(word, correlated_word, correlation),
+  vertices = Words.mentioned %>%
+    semi_join(word.Correlations, by = c("word" = "word"))
+) %>%
+  ggraph(layout = "fr") +
+  geom_edge_link(aes(alpha = correlation), color = "white") +
+  geom_node_point() +
+  geom_node_text(aes(label = name, fontface = "bold"), repel = TRUE) +
+  guides(color = "none") +
+  labs(title = "Word Correlation within OSHA Investigations",
+       subtitle = "The bolder the line, the stronger the Correlation") +
+  scale_fill_grey() +
+  theme_dark() 
+
+
+
+
+```
